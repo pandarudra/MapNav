@@ -1,4 +1,4 @@
-export interface Latlng {
+export type LatLng = {
   lat: number;
   lng: number;
-}
+};

@@ -1,17 +1,34 @@
 import { Server, Socket } from "socket.io";
-import { findShortestPath } from "../services/graphService";
+import { getRoute } from "../services/graphService";
 
 export const setupSocket = (io: Server) => {
   io.on("connection", (socket: Socket) => {
     console.log(`User connected: ${socket.id}`);
 
-    socket.on("find_path", (data: any) => {
-      const { start, end } = data;
-      console.log("Start:", start, "End:", end);
+    socket.on("find_path", async ({ start, end }: { start: any; end: any }) => {
+      try {
+        if (!start || !end) {
+          socket.emit("update_path", []);
+          return;
+        }
+        const routeData = await getRoute({
+          s_lat: start.lat,
+          s_lng: start.lng,
+          e_lat: end.lat,
+          e_lng: end.lng,
+        });
 
-      const shortestPath = findShortestPath(start, end);
-      console.log("Shortest Path:", shortestPath);
-      io.emit("update_path", shortestPath);
+        const coordinates = routeData.features[0].geometry.coordinates;
+        const path = coordinates.map((coord: number[]) => ({
+          lat: coord[1],
+          lng: coord[0],
+        }));
+
+        socket.emit("update_path", path);
+      } catch (error) {
+        console.error("Error fetching route:", error);
+        socket.emit("update_path", []);
+      }
     });
     socket.on("disconnect", () => {
       console.log(`User disconnected: ${socket.id}`);

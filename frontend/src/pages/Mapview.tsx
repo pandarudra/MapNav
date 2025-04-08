@@ -1,4 +1,4 @@
-import { useState, useEffect, FC } from "react";
+import { useState, useEffect, FC, useCallback } from "react";
 import {
   MapContainer,
   TileLayer,
@@ -7,48 +7,75 @@ import {
   useMapEvents,
   Popup,
 } from "react-leaflet";
-import io from "socket.io-client";
+import { LatLngLiteral } from "leaflet";
+import axios from "axios";
 import "leaflet/dist/leaflet.css";
 
-interface LatLng {
-  lat: number;
-  lng: number;
-}
+const ORS_API_KEY = import.meta.env.VITE_ORS_API_KEY;
 
-export const Mapview = () => {
-  const [start, setStart] = useState<LatLng | null>(null);
-  const [end, setEnd] = useState<LatLng | null>(null);
-  const [path, setPath] = useState<LatLng[]>([]);
+export const Mapview: FC = () => {
+  const [start, setStart] = useState<LatLngLiteral | null>(null);
+  const [end, setEnd] = useState<LatLngLiteral | null>(null);
+  const [path, setPath] = useState<LatLngLiteral[]>([]);
 
   const MapClickHandler: FC = () => {
     useMapEvents({
-      click(e: { latlng: LatLng }) {
-        if (!start) setStart(e.latlng);
-        else if (!end) setEnd(e.latlng);
+      click(e) {
+        const { lat, lng } = e.latlng;
+        const clickedPoint: LatLngLiteral = { lat, lng };
+
+        if (!start) setStart(clickedPoint);
+        else if (!end) setEnd(clickedPoint);
+        else {
+          setStart(clickedPoint);
+          setEnd(null);
+          setPath([]);
+        }
       },
     });
     return null;
   };
 
-  useEffect(() => {
-    const socket = io("http://localhost:3000");
+  const fetchRoute = useCallback(async () => {
+    if (!start || !end) return;
 
-    if (start && end) {
-      socket.emit("find_path", { start, end });
+    try {
+      const res = await axios.post(
+        "https://api.openrouteservice.org/v2/directions/driving-car/geojson",
+        {
+          coordinates: [
+            [start.lng, start.lat],
+            [end.lng, end.lat],
+          ],
+        },
+        {
+          headers: {
+            Accept:
+              "application/json, application/geo+json, application/gpx+xml, img/png; charset=utf-8",
+            Authorization: ORS_API_KEY,
+            "Content-Type": "application/json; charset=utf-8",
+          },
+        }
+      );
+
+      console.log("API Response:", res.data);
+      const geometry = res.data.features[0].geometry.coordinates;
+      const formattedPath: LatLngLiteral[] = geometry.map(
+        (coord: number[]) => ({
+          lat: coord[1],
+          lng: coord[0],
+        })
+      );
+
+      setPath(formattedPath);
+    } catch (err) {
+      console.error("Error fetching route:", err);
     }
-
-    const updatePath = (newPath: LatLng[]) => {
-      setPath(newPath);
-      console.log("New Path:", newPath);
-    };
-
-    socket.on("update_path", updatePath);
-
-    return () => {
-      socket.off("update_path", updatePath);
-      socket.disconnect();
-    };
   }, [start, end]);
+
+  useEffect(() => {
+    fetchRoute();
+  }, [start, end, fetchRoute]);
 
   const resetMap = () => {
     setStart(null);
@@ -60,7 +87,7 @@ export const Mapview = () => {
     <>
       <button
         onClick={resetMap}
-        className="absolute top-4 left-1/2 transform -translate-x-1/2 bg-white border border-black px-4 py-2 shadow-md rounded-md hover:bg-gray-200 transition"
+        className="fixed bottom-6 right-6 bg-white border border-black px-4 py-2 shadow-md rounded-md hover:bg-gray-200 transition"
         style={{ zIndex: 1000 }}
       >
         Reset
@@ -73,19 +100,19 @@ export const Mapview = () => {
       >
         <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
         <MapClickHandler />
-        // start pt.
+
         {start && (
           <Marker position={start}>
             <Popup>Start</Popup>
           </Marker>
         )}
-        // end pt.
+
         {end && (
           <Marker position={end}>
             <Popup>End</Popup>
           </Marker>
         )}
-        // path line
+
         {path.length > 0 && <Polyline positions={path} color="blue" />}
       </MapContainer>
     </>
